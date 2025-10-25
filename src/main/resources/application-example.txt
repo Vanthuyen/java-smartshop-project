@@ -1,0 +1,77 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: servlet
+    register-shutdown-hook: true
+  devtools:
+    add-properties: true
+    restart:
+      enabled: true
+  # DBS
+  datasource:
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      idle-timeout: 30000
+      connection-timeout: 30000
+      max-lifetime: 600000
+      pool-name:
+    url:
+    username:
+    password:
+    driver-class-name:
+    type:
+
+  jpa:
+    database: mysql
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+        dialect:
+        jdbc:
+          batch_size:
+          order_inserts: true
+          order_updates: true
+  redis:
+    host:
+    port:
+    password:
+    lettuce:
+      pool:
+        max-active: 10
+        max-idle: 5
+        min-idle: 5
+      connect-timeout: 30000
+
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+openapi:
+  service:
+    api-docs:
+    title:
+    version:
+    server: http://localhost:${server.port}
+
+jwt:
+  expiryMinutes:
+  expiryDay:
+  accessTokenSecretKey:
+  refreshTokenSecretKey:
+
+logging:
+  level:
+    org:
+      springframework:
+        security: DEBUG
