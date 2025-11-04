@@ -15,6 +15,7 @@ import com.example.smartshop.services.OrderService;
 import com.example.smartshop.services.RedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -56,20 +57,19 @@ public class OrderServiceImpl implements OrderService {
         List<Long> productIds = request.getItems().stream()
                 .map(OrderItemRequest::getProductId)
                 .distinct()
+                .sorted()  // ← QUAN TRỌNG: Sort để tránh deadlock
                 .toList();
 
-        // Lock products for update to prevent concurrent modifications
-        List<ProductEntity> products = productRepository.findAllByIdInAndDeletedAtIsNullForUpdate(productIds);
+        List<ProductEntity> products = productRepository
+                .findAllByIdInAndDeletedAtIsNullForUpdate(productIds);
 
         if (products.size() != productIds.size()) {
             throw new ResourceNotFoundException("One or more products not found");
         }
 
-        // Create map for easy lookup
         Map<Long, ProductEntity> productMap = products.stream()
                 .collect(Collectors.toMap(ProductEntity::getId, p -> p));
 
-        // 3. Create order entity
         OrderEntity order = OrderEntity.builder()
                 .user(user)
                 .status(StatusOrder.PENDING)
@@ -79,12 +79,12 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         BigDecimal totalPrice = BigDecimal.ZERO;
+        List<InventoryLogEntity> inventoryLogs = new ArrayList<>();
 
         // 4. Process each order item
         for (OrderItemRequest itemRequest : request.getItems()) {
             ProductEntity product = productMap.get(itemRequest.getProductId());
 
-            // Check stock availability
             if (product.getStock() < itemRequest.getQuantity()) {
                 throw new InsufficientStockException(
                         product.getId(),
@@ -93,12 +93,14 @@ public class OrderServiceImpl implements OrderService {
                 );
             }
 
-            // Reduce stock
-            product.setStock(product.getStock() - itemRequest.getQuantity());
+            int stockBefore = product.getStock();
+            product.setStock(stockBefore - itemRequest.getQuantity());
 
             // Calculate subtotal
             BigDecimal itemPrice = product.getPrice();
-            BigDecimal subtotal = itemPrice.multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
+            BigDecimal subtotal = itemPrice.multiply(
+                    BigDecimal.valueOf(itemRequest.getQuantity())
+            );
             totalPrice = totalPrice.add(subtotal);
 
             // Create order item
@@ -107,17 +109,21 @@ public class OrderServiceImpl implements OrderService {
             orderItem.setProduct(product);
             orderItem.setQuantity(itemRequest.getQuantity());
             orderItem.setPrice(itemPrice);
-
             order.getItems().add(orderItem);
 
-            // Create inventory log
-            InventoryLogEntity inventoryLog = new InventoryLogEntity();
-            inventoryLog.setProduct(product);
-            inventoryLog.setQuantityChange(-itemRequest.getQuantity());
-            inventoryLog.setOperation(OperationType.PURCHASE);
-            inventoryLogRepository.save(inventoryLog);
+            // Prepare inventory log (chưa save)
+            InventoryLogEntity inventoryLog = InventoryLogEntity.builder()
+                    .product(product)
+                    .quantityChange(-itemRequest.getQuantity())
+                    .stockBefore(stockBefore)
+                    .stockAfter(product.getStock())
+                    .operation(OperationType.PURCHASE)
+                    .performedBy(user)
+                    .order(order)  // Set order reference (sẽ có ID sau khi save)
+                    .build();
 
-            // Update Redis cache
+            inventoryLogs.add(inventoryLog);
+
             redisService.updateStock(product.getId(), product.getStock());
 
             log.info("Processed order item - Product: {}, Quantity: {}, New Stock: {}",
@@ -126,8 +132,13 @@ public class OrderServiceImpl implements OrderService {
 
         order.setTotalPrice(totalPrice);
 
-        // 5. Save order
         OrderEntity savedOrder = orderRepository.save(order);
+
+        for (InventoryLogEntity log : inventoryLogs) {
+            log.setNotes("Order #" + savedOrder.getId());
+            log.setReferenceCode("ORDER-" + savedOrder.getId());
+        }
+        inventoryLogRepository.saveAll(inventoryLogs);
 
         log.info("Order created successfully - OrderId: {}, TotalPrice: {}, Items: {}",
                 savedOrder.getId(), totalPrice, savedOrder.getItems().size());
@@ -137,6 +148,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(value = "order", key = "#orderId")
     public OrderResponse getOrderById(Long orderId, String userEmail) {
         OrderEntity order = orderRepository.findByIdAndDeletedAtIsNull(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));

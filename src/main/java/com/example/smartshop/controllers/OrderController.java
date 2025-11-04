@@ -5,14 +5,17 @@ import com.example.smartshop.models.dtos.requets.CreateOrderRequest;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
 import com.example.smartshop.models.dtos.responses.OrderResponse;
 import com.example.smartshop.services.OrderService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/orders")
+@Tag(name = "Order Management", description = "APIs for managing Order")
 public class OrderController {
     @Autowired
     private OrderService orderService;
@@ -36,17 +39,17 @@ public class OrderController {
         String userEmail = authentication.getName();
         OrderResponse order = orderService.getOrderById(orderId, userEmail);
 
-        return ResponseUtil.success("Order retrieved successfully", order);
+        return ResponseUtil.success("Order detail retrieved successfully", order);
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Object>> getMyOrders(
+    public ResponseEntity<ApiResponse<Page<OrderResponse>>> getMyOrders(
             Authentication authentication,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
         String userEmail = authentication.getName();
-        Object orders = orderService.getOrdersByUser(userEmail, page, size);
+        Page<OrderResponse> orders = orderService.getOrdersByUser(userEmail, page, size);
 
         return ResponseUtil.success("Orders retrieved successfully", orders);
     }

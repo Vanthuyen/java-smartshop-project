@@ -68,6 +68,17 @@ public class JWTServiceImpl implements JWTService {
         return extractExpiration(token).before(new Date());
     }
 
+    @Override
+    public long getExpirationMillis(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSignKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        return claims.getExpiration().getTime() - System.currentTimeMillis();
+    }
+
     private Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }

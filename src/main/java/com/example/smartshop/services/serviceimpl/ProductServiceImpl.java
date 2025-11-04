@@ -8,6 +8,7 @@ import com.example.smartshop.models.mappers.ProductMapper;
 import com.example.smartshop.repositories.CategoryRepository;
 import com.example.smartshop.repositories.ProductRepository;
 import com.example.smartshop.services.ProductService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -15,8 +16,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 
 @Service
+@Slf4j
 public class ProductServiceImpl implements ProductService {
 
     @Autowired
@@ -29,6 +34,8 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public Page<ProductResponse> getAllProducts(int page, int size, String search, Long categoryId) {
+        log.info("Fetching products from database: page={}, size={}, search={}, categoryId={}",
+                page, size, search, categoryId);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<ProductEntity> products;
 
@@ -51,6 +58,7 @@ public class ProductServiceImpl implements ProductService {
 
 
     @Override
+    @Cacheable(value = "product", key = "#id")
     public ProductResponse getProductById(Long id) {
         ProductEntity product = productRepository.findById(id).orElseThrow(
                 () -> new RuntimeException("Product not found with id:" + id));
@@ -80,6 +88,10 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#id"),
+            @CacheEvict(value = "products", allEntries = true)
+    })
     public ProductResponse updateProduct(Long id, ProductRequest request) {
         ProductEntity updateProduct = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
@@ -107,6 +119,10 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#id"),
+            @CacheEvict(value = "products", allEntries = true)
+    })
     public void deleteProduct(Long id) {
         ProductEntity product = productRepository.findById(id).orElseThrow(
                 () -> new RuntimeException("Product not found with id: " + id)

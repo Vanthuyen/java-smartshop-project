@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port:
 
 spring:
   main:
@@ -49,6 +49,12 @@ spring:
         max-idle: 5
         min-idle: 5
       connect-timeout: 30000
+    cache:
+      type: redis
+      redis:
+        time-to-live:
+        cache-null-values:
+        use-key-prefix:
 
 
 springdoc:
@@ -68,10 +74,15 @@ jwt:
   expiryMinutes:
   expiryDay:
   accessTokenSecretKey:
-  refreshTokenSecretKey:
 
 logging:
   level:
     org:
       springframework:
         security: DEBUG
+        cache: DEBUG
+        data:
+          redis: DEBUG
+    io:
+      lettuce:
+        core: DEBUG

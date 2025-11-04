@@ -2,10 +2,8 @@ package com.example.smartshop.controllers;
 
 import com.example.smartshop.commons.utils.ResponseUtil;
 import com.example.smartshop.models.dtos.requets.CategoryRequest;
-import com.example.smartshop.models.dtos.requets.ProductRequest;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
 import com.example.smartshop.models.dtos.responses.CategoryResponse;
-import com.example.smartshop.models.dtos.responses.ProductResponse;
 import com.example.smartshop.services.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

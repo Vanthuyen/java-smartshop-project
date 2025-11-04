@@ -5,4 +5,5 @@ import com.example.smartshop.models.dtos.responses.TokenDTO;
 
 public interface AuthService {
     TokenDTO login(LoginDTO login);
+    long getExpirationMillis(String token);
 }

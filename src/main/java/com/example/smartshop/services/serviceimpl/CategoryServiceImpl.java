@@ -8,6 +8,9 @@ import com.example.smartshop.models.mappers.CaterogyMapper;
 import com.example.smartshop.repositories.CategoryRepository;
 import com.example.smartshop.services.CategoryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -39,6 +42,7 @@ public class CategoryServiceImpl implements CategoryService {
 
 
     @Override
+    @Cacheable(value = "category", key = "#id")
     public CategoryResponse GetCategoryById(Long id) {
         CategoryEntity category = categoryRepository.findById(id).orElseThrow(
                 () -> new RuntimeException("Category not found with id: " + id)
@@ -62,6 +66,11 @@ public class CategoryServiceImpl implements CategoryService {
     }
 
     @Override
+    @Caching(evict = {
+            @CacheEvict(value = "category", key = "#id"),
+            @CacheEvict(value = "categories", allEntries = true)
+    })
+    @Transactional
     public CategoryResponse updateCategory(Long id, CategoryRequest categoryRequest) {
         CategoryEntity updateCategory = categoryRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Category not found with id: " + id));
@@ -83,6 +92,10 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "category", key = "#id"),
+            @CacheEvict(value = "categories", allEntries = true)
+    })
     public void deleteCategory(Long id) {
         CategoryEntity category = categoryRepository.findById(id).orElseThrow(
                 () -> new RuntimeException("Category not found with id: " + id)

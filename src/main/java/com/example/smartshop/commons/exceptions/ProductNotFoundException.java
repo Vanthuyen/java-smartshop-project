@@ -1,5 +1,8 @@
 package com.example.smartshop.commons.exceptions;
 
+import lombok.Getter;
+
+@Getter
 public class ProductNotFoundException extends RuntimeException {
     private final Long productId;
 
@@ -8,7 +11,4 @@ public class ProductNotFoundException extends RuntimeException {
         this.productId = productId;
     }
 
-    public Long getProductId() {
-        return productId;
-    }
 }

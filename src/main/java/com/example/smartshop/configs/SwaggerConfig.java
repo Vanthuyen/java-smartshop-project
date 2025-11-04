@@ -17,12 +17,13 @@ import java.util.List;
 @Configuration
 public class SwaggerConfig {
     @Bean
-    public GroupedOpenApi publicOpenApi(@Value("${openapi.service.api-docs}") String apiDocs){
+    public GroupedOpenApi publicOpenApi(@Value("${openapi.service.api-docs}") String apiDocs) {
         return GroupedOpenApi.builder()
                 .group(apiDocs)
                 .packagesToScan("com.example.smartshop.controllers")
                 .build();
     }
+
 
     @Bean
     public OpenAPI openAPI(

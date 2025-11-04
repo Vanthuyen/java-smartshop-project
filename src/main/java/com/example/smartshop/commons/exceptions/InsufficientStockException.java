@@ -1,5 +1,8 @@
 package com.example.smartshop.commons.exceptions;
 
+import lombok.Getter;
+
+@Getter
 public class InsufficientStockException extends RuntimeException {
     private final Long productId;
     private final int requested;
@@ -13,15 +16,4 @@ public class InsufficientStockException extends RuntimeException {
         this.available = available;
     }
 
-    public Long getProductId() {
-        return productId;
-    }
-
-    public int getRequested() {
-        return requested;
-    }
-
-    public int getAvailable() {
-        return available;
-    }
 }

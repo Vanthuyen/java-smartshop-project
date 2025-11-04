@@ -37,7 +37,7 @@ public class ProductController {
     @Operation(summary = "Get product by ID")
     public ResponseEntity<ApiResponse<ProductResponse>> getProductById(@PathVariable Long id) {
         ProductResponse product = productService.getProductById(id);
-        return ResponseUtil.success("Get Product Succesfully", product);
+        return ResponseUtil.success("Get Product Successfully", product);
     }
 
     @PostMapping
@@ -45,7 +45,7 @@ public class ProductController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<ProductResponse>> createProduct(@Valid @RequestBody ProductRequest productRequest) {
         ProductResponse product = productService.createProduct(productRequest);
-        return ResponseUtil.success("Create Product Succesfully", product);
+        return ResponseUtil.success("Create Product Successfully", product);
     }
 
     @PutMapping("/{id}")
@@ -53,7 +53,7 @@ public class ProductController {
     @Operation(summary = "Update product (Admin only)")
     public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(@Valid @RequestBody ProductRequest productRequest,@PathVariable Long id) {
         ProductResponse product = productService.updateProduct(id, productRequest);
-        return ResponseUtil.success("Update Product Succesfully", product);
+        return ResponseUtil.success("Update Product Successfully", product);
     }
 
     @DeleteMapping("/{id}")

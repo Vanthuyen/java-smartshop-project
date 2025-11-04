@@ -44,4 +44,9 @@ public class AuthServiceImpl implements AuthService {
             throw new RuntimeException("Invalid email or password");
         }
     }
+
+    @Override
+    public long getExpirationMillis(String token) {
+        return jwtService.getExpirationMillis(token);
+    }
 }

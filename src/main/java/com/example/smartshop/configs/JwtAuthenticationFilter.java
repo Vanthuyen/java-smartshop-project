@@ -35,9 +35,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private JWTService jwtService;
 
     @Autowired
-    private UserDetailsService userDetailsService;
-
-    @Autowired
     private RedisService redisService;
 
     @Override
@@ -48,7 +45,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         final String authHeader = request.getHeader("Authorization");
         final String jwt;
-        final String userEmail;
 
         log.info("Processing request: {} {}", request.getMethod(), request.getRequestURI());
 

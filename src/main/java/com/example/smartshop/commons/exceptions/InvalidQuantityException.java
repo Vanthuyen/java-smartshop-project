@@ -1,5 +1,8 @@
 package com.example.smartshop.commons.exceptions;
 
+import lombok.Getter;
+
+@Getter
 public class InvalidQuantityException extends RuntimeException {
     private final int quantity;
 
@@ -8,7 +11,4 @@ public class InvalidQuantityException extends RuntimeException {
         this.quantity = quantity;
     }
 
-    public int getQuantity() {
-        return quantity;
-    }
 }
