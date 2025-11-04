@@ -194,12 +194,13 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<InventoryLogResponse> getLogsByDateRange(
+    public CacheablePage<InventoryLogResponse> getLogsByDateRange(
             LocalDateTime startDate,
             LocalDateTime endDate,
             Pageable pageable) {
-        return inventoryLogRepository.findByDateRange(startDate, endDate, pageable)
+        Page<InventoryLogResponse> page = inventoryLogRepository.findByDateRange(startDate, endDate, pageable)
                 .map(this::mapToResponse);
+        return CacheablePage.of(page);
     }
 
 

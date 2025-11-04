@@ -3,12 +3,13 @@ package com.example.smartshop.controllers;
 import com.example.smartshop.commons.utils.ResponseUtil;
 import com.example.smartshop.models.dtos.requets.CreateOrderRequest;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.OrderResponse;
 import com.example.smartshop.services.OrderService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +22,7 @@ public class OrderController {
     private OrderService orderService;
 
     @PostMapping
+    @Operation(summary = "Create Order")
     public ResponseEntity<ApiResponse<OrderResponse>> createOrder(
             @Valid @RequestBody CreateOrderRequest request,
             Authentication authentication) {
@@ -32,6 +34,7 @@ public class OrderController {
     }
 
     @GetMapping("/{orderId}")
+    @Operation(summary = "Get Order Detail")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(
             @PathVariable Long orderId,
             Authentication authentication) {
@@ -43,13 +46,14 @@ public class OrderController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Page<OrderResponse>>> getMyOrders(
+    @Operation(summary = "Get My Order")
+    public ResponseEntity<ApiResponse<CacheablePage<OrderResponse>>> getMyOrders(
             Authentication authentication,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
         String userEmail = authentication.getName();
-        Page<OrderResponse> orders = orderService.getOrdersByUser(userEmail, page, size);
+        CacheablePage<OrderResponse> orders = orderService.getOrdersByUser(userEmail, page, size);
 
         return ResponseUtil.success("Orders retrieved successfully", orders);
     }

@@ -3,6 +3,7 @@ package com.example.smartshop.services.serviceimpl;
 import com.example.smartshop.entities.CategoryEntity;
 import com.example.smartshop.entities.ProductEntity;
 import com.example.smartshop.models.dtos.requets.CategoryRequest;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.CategoryResponse;
 import com.example.smartshop.models.mappers.CaterogyMapper;
 import com.example.smartshop.repositories.CategoryRepository;
@@ -27,7 +28,9 @@ public class CategoryServiceImpl implements CategoryService {
     private CaterogyMapper caterogyMapper;
 
     @Override
-    public Page<CategoryResponse> findAllCategories(int page, int size, String search) {
+    @Cacheable(value = "categories", key = "#page + '-' + #size + '-' + (#search != null ? #search : 'null')")
+    @Transactional(readOnly = true)
+    public CacheablePage<CategoryResponse> findAllCategories(int page, int size, String search) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<CategoryEntity> categories;
 
@@ -37,7 +40,7 @@ public class CategoryServiceImpl implements CategoryService {
             categories = categoryRepository.findByDeletedAtIsNull(pageable);
         }
 
-        return categories.map(caterogyMapper::toResponse);
+        return CacheablePage.of(categories.map(caterogyMapper::toResponse));
     }
 
 

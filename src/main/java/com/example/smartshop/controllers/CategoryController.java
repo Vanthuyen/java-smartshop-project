@@ -3,6 +3,7 @@ package com.example.smartshop.controllers;
 import com.example.smartshop.commons.utils.ResponseUtil;
 import com.example.smartshop.models.dtos.requets.CategoryRequest;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.CategoryResponse;
 import com.example.smartshop.services.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,12 +24,12 @@ public class CategoryController {
 
     @GetMapping
     @Operation(summary = "Get all categories (Admin only)")
-    public ResponseEntity<ApiResponse<Page<CategoryResponse>>> getAllCategories(
+    public ResponseEntity<ApiResponse<CacheablePage<CategoryResponse>>> getAllCategories(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String search) {
 
-        Page<CategoryResponse> categories = categoryService.findAllCategories(page, size, search);
+        CacheablePage<CategoryResponse> categories = categoryService.findAllCategories(page, size, search);
         return ResponseUtil.success("Get all categories successfully", categories);
     }
 

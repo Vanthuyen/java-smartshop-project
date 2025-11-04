@@ -8,6 +8,7 @@ import com.example.smartshop.commons.exceptions.UnauthorizedException;
 import com.example.smartshop.entities.*;
 import com.example.smartshop.models.dtos.requets.CreateOrderRequest;
 import com.example.smartshop.models.dtos.requets.OrderItemRequest;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.OrderItemResponse;
 import com.example.smartshop.models.dtos.responses.OrderResponse;
 import com.example.smartshop.repositories.*;
@@ -163,14 +164,15 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<OrderResponse> getOrdersByUser(String userEmail, int page, int size) {
+    @Cacheable(value = "order", key = "#userEmail")
+    public CacheablePage<OrderResponse> getOrdersByUser(String userEmail, int page, int size) {
         UserEntity user = userRepository.findByEmailAndDeletedAtIsNull(userEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Page<OrderEntity> orders = orderRepository.findByUserAndDeletedAtIsNull(user, pageable);
 
-        return orders.map(this::mapToOrderResponse);
+        return CacheablePage.of(orders.map(this::mapToOrderResponse));
     }
 
     private OrderResponse mapToOrderResponse(OrderEntity order) {

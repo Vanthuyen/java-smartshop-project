@@ -26,7 +26,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/inventories")
 @Slf4j
-@Tag(name = "Inventory Management", description = "APIs for managing Inventory")
+@Tag(name = "Inventory Log Management", description = "APIs for managing Inventory")
 public class InventoryController {
 
     @Autowired
@@ -127,13 +127,13 @@ public class InventoryController {
     @GetMapping("/logs/date-range")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Get logs by date range")
-    public ResponseEntity<ApiResponse<Page<InventoryLogResponse>>> getLogsByDateRange(
+    public ResponseEntity<ApiResponse<CacheablePage<InventoryLogResponse>>> getLogsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        Page<InventoryLogResponse> logs = inventoryService.getLogsByDateRange(
+        CacheablePage<InventoryLogResponse> logs = inventoryService.getLogsByDateRange(
                 startDate,
                 endDate,
                 PageRequest.of(page, size)

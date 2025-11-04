@@ -3,6 +3,7 @@ package com.example.smartshop.services.serviceimpl;
 import com.example.smartshop.entities.CategoryEntity;
 import com.example.smartshop.entities.ProductEntity;
 import com.example.smartshop.models.dtos.requets.ProductRequest;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.ProductResponse;
 import com.example.smartshop.models.mappers.ProductMapper;
 import com.example.smartshop.repositories.CategoryRepository;
@@ -33,7 +34,8 @@ public class ProductServiceImpl implements ProductService {
 
 
     @Override
-    public Page<ProductResponse> getAllProducts(int page, int size, String search, Long categoryId) {
+    @Cacheable(value = "products", key = "#page + '-' + #size + '-' + (#search != null ? #search : 'null') + '-' + (#categoryId != null ? #categoryId : 'null')")
+    public CacheablePage<ProductResponse> getAllProducts(int page, int size, String search, Long categoryId) {
         log.info("Fetching products from database: page={}, size={}, search={}, categoryId={}",
                 page, size, search, categoryId);
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -53,7 +55,7 @@ public class ProductServiceImpl implements ProductService {
             products = productRepository.findByDeletedAtIsNull(pageable);
         }
 
-        return products.map(productMapper::toResponse);
+        return CacheablePage.of(products.map(productMapper::toResponse));
     }
 
 

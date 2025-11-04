@@ -3,6 +3,7 @@ package com.example.smartshop.controllers;
 import com.example.smartshop.commons.utils.ResponseUtil;
 import com.example.smartshop.models.dtos.requets.ProductRequest;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
+import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.ProductResponse;
 import com.example.smartshop.services.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,13 +23,14 @@ public class ProductController {
     private ProductService productService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Page<ProductResponse>>> getAllProducts(
+    @Operation(summary = "Get All product")
+    public ResponseEntity<ApiResponse<CacheablePage<ProductResponse>>> getAllProducts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long categoryId) {
 
-        Page<ProductResponse> products = productService.getAllProducts(page, size, search, categoryId);
+        CacheablePage<ProductResponse> products = productService.getAllProducts(page, size, search, categoryId);
         return ResponseUtil.success("Get all products successfully", products);
     }
 
