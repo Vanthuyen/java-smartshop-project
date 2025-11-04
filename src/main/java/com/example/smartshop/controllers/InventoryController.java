@@ -1,9 +1,7 @@
 package com.example.smartshop.controllers;
 
 import com.example.smartshop.commons.utils.ResponseUtil;
-import com.example.smartshop.models.dtos.requets.PurchaseMultiRequest;
-import com.example.smartshop.models.dtos.requets.PurchaseRequest;
-import com.example.smartshop.models.dtos.requets.RestockRequest;
+import com.example.smartshop.models.dtos.requets.*;
 import com.example.smartshop.models.dtos.responses.ApiResponse;
 import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.InventoryLogResponse;
@@ -45,7 +43,6 @@ public class InventoryController {
     }
 
     @PostMapping("/purchase")
-    @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Purchase product", description = "Purchase a single product")
     public ResponseEntity<ApiResponse<Object>> purchase(@Valid @RequestBody PurchaseRequest req) {
         log.info("Purchase request received: productId={}, quantity={}, orderId={}",
@@ -57,7 +54,6 @@ public class InventoryController {
     }
 
     @PostMapping("/purchase-multi")
-    @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Purchase multiple products", description = "Purchase multiple products in one order")
     public ResponseEntity<ApiResponse<Object>> purchaseMultiple(@Valid @RequestBody PurchaseMultiRequest req) {
         log.info("Multiple purchase request received: {} items, orderId={}",
@@ -70,7 +66,7 @@ public class InventoryController {
 
     @GetMapping("/logs")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Get all inventory logs", description = "Get paginated inventory logs")
+    @Operation(summary = "Get all inventory logs", description = "Get paginated inventory logs (Admin only)")
     public ResponseEntity<ApiResponse<CacheablePage<InventoryLogResponse>>> getAllLogs(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -84,7 +80,7 @@ public class InventoryController {
 
     @GetMapping("/logs/product/{productId}")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "Get logs by product", description = "Get inventory logs for specific product")
+    @Operation(summary = "Get logs by product", description = "Get inventory logs for specific product (Admin only)")
     public ResponseEntity<ApiResponse<CacheablePage<InventoryLogResponse>>> getLogsByProduct(
             @PathVariable Long productId,
             @RequestParam(defaultValue = "0") int page,
@@ -99,7 +95,8 @@ public class InventoryController {
     }
 
     @GetMapping("/logs/order/{orderId}")
-    @Operation(summary = "Get logs by order", description = "Get inventory logs for specific order")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Get logs by order", description = "Get inventory logs for specific order (Admin only)")
     public ResponseEntity<ApiResponse<List<InventoryLogResponse>>> getLogsByOrder(
             @PathVariable Long orderId) {
 
@@ -140,5 +137,27 @@ public class InventoryController {
         );
 
         return ResponseUtil.success("Date range logs retrieved successfully", logs);
+    }
+
+    @PostMapping("/return")
+    @Operation(summary = "Return product", description = "Return purchased product and restore stock")
+    public ResponseEntity<ApiResponse<Object>> returnProduct(@Valid @RequestBody ReturnRequest req) {
+        log.info("Return request: productId={}, quantity={}", req.getProductId(), req.getQuantity());
+
+        inventoryService.returnProduct(req);
+
+        return ResponseUtil.success("Product returned successfully", null);
+    }
+
+    @PostMapping("/adjust")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Adjust stock", description = "Manual stock adjustment (Admin only)")
+    public ResponseEntity<ApiResponse<Object>> adjustStock(@Valid @RequestBody AdjustStockRequest req) {
+        log.info("Adjust stock request: productId={}, change={}",
+                req.getProductId(), req.getQuantityChange());
+
+        inventoryService.adjustStock(req);
+
+        return ResponseUtil.success("Stock adjusted successfully", null);
     }
 }

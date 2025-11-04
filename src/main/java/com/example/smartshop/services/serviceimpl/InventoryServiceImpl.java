@@ -3,15 +3,18 @@ package com.example.smartshop.services.serviceimpl;
 import com.example.smartshop.commons.enums.OperationType;
 import com.example.smartshop.commons.exceptions.InvalidQuantityException;
 import com.example.smartshop.commons.exceptions.ProductNotFoundException;
+import com.example.smartshop.commons.exceptions.ResourceNotFoundException;
 import com.example.smartshop.entities.InventoryLogEntity;
+import com.example.smartshop.entities.OrderEntity;
 import com.example.smartshop.entities.ProductEntity;
-import com.example.smartshop.models.dtos.requets.PurchaseMultiRequest;
-import com.example.smartshop.models.dtos.requets.PurchaseRequest;
-import com.example.smartshop.models.dtos.requets.RestockRequest;
+import com.example.smartshop.entities.UserEntity;
+import com.example.smartshop.models.dtos.requets.*;
 import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.InventoryLogResponse;
 import com.example.smartshop.repositories.InventoryLogRepository;
+import com.example.smartshop.repositories.OrderRepository;
 import com.example.smartshop.repositories.ProductRepository;
+import com.example.smartshop.repositories.UserRepository;
 import com.example.smartshop.services.InventoryService;
 import com.example.smartshop.services.RedisService;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +43,11 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Autowired
     private RedisService redisService;
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
 
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -48,19 +56,31 @@ public class InventoryServiceImpl implements InventoryService {
                 request.getProductId(), request.getQuantity(), request.getOperatorId());
         if (request.getQuantity() <= 0) throw new IllegalArgumentException("Quantity must be positive");
 
-        ProductEntity p = productRepository.findByIdForUpdate(request.getProductId())
+        ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
                 .orElseThrow(() -> new RuntimeException("Product not found: " + request.getProductId()));
+        UserEntity operator = userRepository.findById(request.getOperatorId())
+                .orElseThrow(() -> new RuntimeException("Operator not found"));
 
-        int prev = p.getStock();
-        p.setStock(prev + request.getQuantity());
-        productRepository.save(p);
+        int stockBefore = product.getStock();
 
-        InventoryLogEntity log = new InventoryLogEntity();
-        log.setProduct(p);
-        log.setQuantityChange(request.getQuantity());
-        log.setOperation(OperationType.RESTOCK);
+        product.setStock(stockBefore + request.getQuantity());
+        productRepository.save(product);
+
+        // Create detailed log
+        InventoryLogEntity log = InventoryLogEntity.builder()
+                .product(product)
+                .quantityChange(request.getQuantity())
+                .stockBefore(stockBefore)
+                .stockAfter(product.getStock())
+                .operation(OperationType.RESTOCK)
+                .performedBy(operator)
+                .notes("Restocked by " + operator.getName())
+                .referenceCode("RESTOCK-" + System.currentTimeMillis())
+                .build();
+
         inventoryLogRepository.save(log);
-        redisService.updateStock(request.getProductId(), p.getStock());
+
+        redisService.updateStock(request.getProductId(), product.getStock());
     }
 
     @Override
@@ -70,29 +90,47 @@ public class InventoryServiceImpl implements InventoryService {
                 request.getProductId(), request.getQuantity(), request.getOrderId(), request.getCustomerId());
         if (request.getQuantity() <= 0) throw new InvalidQuantityException(request.getQuantity());
 
-        ProductEntity p = productRepository.findByIdForUpdate(request.getProductId())
+        ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
                 .orElseThrow(() -> new ProductNotFoundException(request.getProductId()));
 
-        if (p.getStock() < request.getQuantity()) {
-            throw new RuntimeException("Not enough stock for productId=" + request.getProductId());
-        }
-        p.setStock(p.getStock() - request.getQuantity());
-        productRepository.save(p);
+        UserEntity customer = userRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
 
-        InventoryLogEntity log = new InventoryLogEntity();
-        log.setProduct(p);
-        log.setQuantityChange(-request.getQuantity());
-        log.setOperation(OperationType.PURCHASE);
+        int stockBefore = product.getStock();
+        if (stockBefore < request.getQuantity()) {
+            throw new RuntimeException(
+                    String.format("Insufficient stock for product %s. Available: %d, Requested: %d",
+                            product.getName(), stockBefore, request.getQuantity())
+            );
+        }
+
+        // Reduce stock
+        product.setStock(stockBefore - request.getQuantity());
+        productRepository.save(product);
+
+        // Create log
+        InventoryLogEntity log = InventoryLogEntity.builder()
+                .product(product)
+                .quantityChange(-request.getQuantity())
+                .stockBefore(stockBefore)
+                .stockAfter(product.getStock())
+                .operation(OperationType.PURCHASE)
+                .performedBy(customer)
+                .notes("Purchased by " + customer.getName())
+                .referenceCode("ORDER-" + request.getOrderId())
+                .build();
+
         inventoryLogRepository.save(log);
 
-        redisService.updateStock(request.getProductId(), p.getStock());
-
+        // Update Redis
+        redisService.updateStock(request.getProductId(), product.getStock());
     }
 
     @Override
     @Transactional
     public void purchaseMultiple(PurchaseMultiRequest request) {
-
+        log.info("Processing multiple purchases: {} items, orderId={}, customerId={}",
+                request.getItems().size(), request.getOrderId(), request.getCustomerId());
         // Validate items
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new IllegalArgumentException("Items cannot be empty");
@@ -104,42 +142,79 @@ public class InventoryServiceImpl implements InventoryService {
                 throw new InvalidQuantityException(entry.getValue());
             }
         }
-        // sort ids to avoid deadlocks
-        List<Long> ids = request.getItems().keySet().stream().sorted().collect(Collectors.toList());
+        UserEntity customer = userRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
 
-        List<ProductEntity> products = productRepository.findAllByIdInForUpdate(ids);
-        Map<Long, ProductEntity> byId = products.stream().collect(Collectors.toMap(ProductEntity::getId, p -> p));
+        // Sort IDs to avoid deadlock
+        List<Long> sortedIds = request.getItems().keySet().stream()
+                .sorted()
+                .collect(Collectors.toList());
 
-        for (Map.Entry<Long, Integer> e : request.getItems().entrySet()) {
-            Long id = e.getKey();
-            int qty = e.getValue();
-            ProductEntity p = byId.get(id);
-            if (p == null) throw new RuntimeException("Product not found: " + id);
-            if (p.getStock() < qty)
-                throw new RuntimeException("Not enough stock for product " + id);
+        // Lock products
+        List<ProductEntity> products = productRepository.findAllByIdInForUpdate(sortedIds);
+
+        if (products.size() != sortedIds.size()) {
+            throw new ProductNotFoundException(null);
         }
 
-        for (Map.Entry<Long, Integer> e : request.getItems().entrySet()) {
-            Long id = e.getKey();
-            int qty = e.getValue();
-            ProductEntity p = byId.get(id);
-            p.setStock(p.getStock() - qty);
-        }
-        productRepository.saveAll(products);
+        Map<Long, ProductEntity> productMap = products.stream()
+                .collect(Collectors.toMap(ProductEntity::getId, p -> p));
 
-        // create logs
+        // Validate stock for all items first
+        for (Map.Entry<Long, Integer> entry : request.getItems().entrySet()) {
+            Long productId = entry.getKey();
+            Integer quantity = entry.getValue();
+            ProductEntity product = productMap.get(productId);
+
+            if (product == null) {
+                throw new ProductNotFoundException(productId);
+            }
+
+            if (product.getStock() < quantity) {
+                throw new RuntimeException(
+                        String.format("Insufficient stock for product %s. Available: %d, Requested: %d",
+                                product.getName(), product.getStock(), quantity)
+                );
+            }
+        }
+
+        // Process all items
         List<InventoryLogEntity> logs = new ArrayList<>();
-        for (Map.Entry<Long, Integer> e : request.getItems().entrySet()) {
-            InventoryLogEntity log = new InventoryLogEntity();
-            log.setProduct(byId.get(e.getKey()));
-            log.setQuantityChange(-e.getValue());
-            log.setOperation(OperationType.PURCHASE);
+
+        for (Map.Entry<Long, Integer> entry : request.getItems().entrySet()) {
+            Long productId = entry.getKey();
+            Integer quantity = entry.getValue();
+            ProductEntity product = productMap.get(productId);
+
+            int stockBefore = product.getStock();
+            product.setStock(stockBefore - quantity);
+
+            // Create log
+            InventoryLogEntity log = InventoryLogEntity.builder()
+                    .product(product)
+                    .quantityChange(-quantity)
+                    .stockBefore(stockBefore)
+                    .stockAfter(product.getStock())
+                    .operation(OperationType.PURCHASE)
+                    .performedBy(customer)
+                    .notes("Multi-purchase by " + customer.getName())
+                    .referenceCode("ORDER-" + request.getOrderId())
+                    .build();
+
             logs.add(log);
         }
+
+        // Save all
+        productRepository.saveAll(products);
         inventoryLogRepository.saveAll(logs);
-        for (ProductEntity p : products) {
-            redisService.updateStock(p.getId(), p.getStock());
+
+        // Update Redis for all products
+        for (ProductEntity product : products) {
+            redisService.updateStock(product.getId(), product.getStock());
         }
+
+        log.info("Multiple purchases completed - Total items: {}, OrderId: {}",
+                request.getItems().size(), request.getOrderId());
     }
 
     @Override
@@ -201,6 +276,81 @@ public class InventoryServiceImpl implements InventoryService {
         Page<InventoryLogResponse> page = inventoryLogRepository.findByDateRange(startDate, endDate, pageable)
                 .map(this::mapToResponse);
         return CacheablePage.of(page);
+    }
+
+    @Override
+    @Transactional
+    public void returnProduct(ReturnRequest request) {
+        log.info("Processing return: productId={}, quantity={}, orderId={}, customerId={}",
+                request.getProductId(), request.getQuantity(), request.getOrderId(), request.getCustomerId());
+
+        if (request.getQuantity() <= 0) {
+            throw new InvalidQuantityException(request.getQuantity());
+        }
+
+        ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
+                .orElseThrow(() -> new ProductNotFoundException(request.getProductId()));
+
+        UserEntity customer = userRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer not found"));
+        OrderEntity order = orderRepository.findById(request.getOrderId())
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        int stockBefore = product.getStock();
+        product.setStock(stockBefore + request.getQuantity());
+        productRepository.save(product);
+
+        InventoryLogEntity log = InventoryLogEntity.builder()
+                .product(product)
+                .quantityChange(request.getQuantity())
+                .stockBefore(stockBefore)
+                .stockAfter(product.getStock())
+                .operation(OperationType.RETURN)
+                .performedBy(customer)
+                .order(order)
+                .notes("Return reason: " + request.getReason())
+                .referenceCode("RETURN-ORDER-" + request.getOrderId())
+                .build();
+
+        inventoryLogRepository.save(log);
+        redisService.updateStock(request.getProductId(), product.getStock());
+    }
+
+    @Override
+    @Transactional
+    public void adjustStock(AdjustStockRequest request) {
+        log.info("Adjusting stock: productId={}, change={}, operatorId={}, reason={}",
+                request.getProductId(), request.getQuantityChange(), request.getOperatorId(), request.getReason());
+
+        ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
+                .orElseThrow(() -> new ProductNotFoundException(request.getProductId()));
+
+        UserEntity operator = userRepository.findById(request.getOperatorId())
+                .orElseThrow(() -> new RuntimeException("Operator not found"));
+
+        int stockBefore = product.getStock();
+        int newStock = stockBefore + request.getQuantityChange();
+
+        if (newStock < 0) {
+            throw new RuntimeException("Stock cannot be negative after adjustment");
+        }
+
+        product.setStock(newStock);
+        productRepository.save(product);
+
+        InventoryLogEntity log = InventoryLogEntity.builder()
+                .product(product)
+                .quantityChange(request.getQuantityChange())
+                .stockBefore(stockBefore)
+                .stockAfter(newStock)
+                .operation(OperationType.ADJUSTMENT)
+                .performedBy(operator)
+                .notes("Adjustment reason: " + request.getReason())
+                .referenceCode("ADJUST-" + System.currentTimeMillis())
+                .build();
+
+        inventoryLogRepository.save(log);
+        redisService.updateStock(request.getProductId(), newStock);
     }
 
 

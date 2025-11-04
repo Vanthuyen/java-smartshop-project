@@ -1,8 +1,6 @@
 package com.example.smartshop.services;
 
-import com.example.smartshop.models.dtos.requets.PurchaseMultiRequest;
-import com.example.smartshop.models.dtos.requets.PurchaseRequest;
-import com.example.smartshop.models.dtos.requets.RestockRequest;
+import com.example.smartshop.models.dtos.requets.*;
 import com.example.smartshop.models.dtos.responses.CacheablePage;
 import com.example.smartshop.models.dtos.responses.InventoryLogResponse;
 import org.springframework.data.domain.Pageable;
@@ -23,4 +21,7 @@ public interface InventoryService {
             LocalDateTime endDate,
             Pageable pageable
     );
+
+    void returnProduct(ReturnRequest request);
+    void adjustStock(AdjustStockRequest request);
 }
