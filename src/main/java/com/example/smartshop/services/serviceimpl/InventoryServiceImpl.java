@@ -19,7 +19,9 @@ import com.example.smartshop.services.InventoryService;
 import com.example.smartshop.services.RedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,9 +34,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Inventory Service Implementation with Redis Cache
+ *
+ * Cache Strategy:
+ * - Inventory logs (2 min): Fresh data needed, changes frequently
+ * - When stock changes: evict product, products, productStock, inventory-log caches
+ *
+ * @version 2.0
+ */
 @Service
 @Slf4j
 public class InventoryServiceImpl implements InventoryService {
+
     @Autowired
     private ProductRepository productRepository;
 
@@ -43,30 +55,53 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Autowired
     private RedisService redisService;
+
     @Autowired
     private UserRepository userRepository;
 
     @Autowired
     private OrderRepository orderRepository;
 
+    /**
+     * Restock product with cache eviction
+     *
+     * When restocking:
+     * 1. Product detail cache must be cleared (stock changed)
+     * 2. Products list cache must be cleared (may affect display)
+     * 3. Product stock cache must be cleared
+     * 4. Inventory log cache must be cleared (new log added)
+     */
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#request.productId"),
+            @CacheEvict(value = "products", allEntries = true),
+            @CacheEvict(value = "productStock", key = "#request.productId"),
+            @CacheEvict(value = "inventory-log", allEntries = true)
+    })
     public void restock(RestockRequest request) {
-        log.info("Restocking product: productId={}, quantity={}, operatorId={}",
+        log.info("📦 Restocking product: productId={}, quantity={}, operatorId={}",
                 request.getProductId(), request.getQuantity(), request.getOperatorId());
-        if (request.getQuantity() <= 0) throw new IllegalArgumentException("Quantity must be positive");
 
+        // Validation
+        if (request.getQuantity() <= 0) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
+
+        // Lock and get product
         ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
                 .orElseThrow(() -> new RuntimeException("Product not found: " + request.getProductId()));
+
         UserEntity operator = userRepository.findById(request.getOperatorId())
                 .orElseThrow(() -> new RuntimeException("Operator not found"));
 
         int stockBefore = product.getStock();
 
+        // Update stock
         product.setStock(stockBefore + request.getQuantity());
         productRepository.save(product);
 
-        // Create detailed log
+        // Create inventory log
         InventoryLogEntity log = InventoryLogEntity.builder()
                 .product(product)
                 .quantityChange(request.getQuantity())
@@ -80,15 +115,29 @@ public class InventoryServiceImpl implements InventoryService {
 
         inventoryLogRepository.save(log);
 
+        // Update Redis stock cache
         redisService.updateStock(request.getProductId(), product.getStock());
     }
 
+    /**
+     * Purchase product (single item)
+     * Same cache eviction strategy as restock
+     */
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#request.productId"),
+            @CacheEvict(value = "products", allEntries = true),
+            @CacheEvict(value = "productStock", key = "#request.productId"),
+            @CacheEvict(value = "inventory-log", allEntries = true)
+    })
     public void purchase(PurchaseRequest request) {
-        log.info("Processing purchase: productId={}, quantity={}, orderId={}, customerId={}",
+        log.info("🛒 Processing purchase: productId={}, quantity={}, orderId={}, customerId={}",
                 request.getProductId(), request.getQuantity(), request.getOrderId(), request.getCustomerId());
-        if (request.getQuantity() <= 0) throw new InvalidQuantityException(request.getQuantity());
+
+        if (request.getQuantity() <= 0) {
+            throw new InvalidQuantityException(request.getQuantity());
+        }
 
         ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
                 .orElseThrow(() -> new ProductNotFoundException(request.getProductId()));
@@ -97,6 +146,8 @@ public class InventoryServiceImpl implements InventoryService {
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
 
         int stockBefore = product.getStock();
+
+        // Check stock availability
         if (stockBefore < request.getQuantity()) {
             throw new RuntimeException(
                     String.format("Insufficient stock for product %s. Available: %d, Requested: %d",
@@ -126,11 +177,22 @@ public class InventoryServiceImpl implements InventoryService {
         redisService.updateStock(request.getProductId(), product.getStock());
     }
 
+    /**
+     * Purchase multiple products
+     * Clear cache for ALL affected products
+     */
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Caching(evict = {
+            @CacheEvict(value = "products", allEntries = true),
+            @CacheEvict(value = "inventory-log", allEntries = true)
+            // Note: Can't evict specific product/productStock keys here as we have multiple IDs
+            // They will expire via TTL
+    })
     public void purchaseMultiple(PurchaseMultiRequest request) {
-        log.info("Processing multiple purchases: {} items, orderId={}, customerId={}",
+        log.info("🛒 Processing multiple purchases: {} items, orderId={}, customerId={}",
                 request.getItems().size(), request.getOrderId(), request.getCustomerId());
+
         // Validate items
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new IllegalArgumentException("Items cannot be empty");
@@ -142,6 +204,7 @@ public class InventoryServiceImpl implements InventoryService {
                 throw new InvalidQuantityException(entry.getValue());
             }
         }
+
         UserEntity customer = userRepository.findById(request.getCustomerId())
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
 
@@ -213,75 +276,25 @@ public class InventoryServiceImpl implements InventoryService {
             redisService.updateStock(product.getId(), product.getStock());
         }
 
-        log.info("Multiple purchases completed - Total items: {}, OrderId: {}",
+        log.info("✅ Multiple purchases completed - Total items: {}, OrderId: {}",
                 request.getItems().size(), request.getOrderId());
+        log.debug("🗑️ Evicted cache: products (all), inventory-log (all)");
     }
 
+    /**
+     * Return product
+     * Same cache eviction as restock (stock increases)
+     */
     @Override
-    @Transactional(readOnly = true)
-    @Cacheable(
-            value = "inventory-log",
-            key = "#pageable.pageNumber + '-' + #pageable.pageSize"
-    )
-    public CacheablePage<InventoryLogResponse> getAllLogs(Pageable pageable) {
-        Page<InventoryLogResponse> page = inventoryLogRepository
-                .findAllWithDetails(pageable)
-                .map(this::mapToResponse);
-        return CacheablePage.of(page);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    @Cacheable(
-            value = "inventory-log",
-            key = "#productId + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
-    )
-    public CacheablePage<InventoryLogResponse> getLogsByProduct(Long productId, Pageable pageable) {
-        Page<InventoryLogResponse> page = inventoryLogRepository
-                .findByProductIdOrderByCreatedAtDesc(productId, pageable)
-                .map(this::mapToResponse);
-        return CacheablePage.of(page);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    @Cacheable(value = "inventory-log", key = "#orderId")
-    public List<InventoryLogResponse> getLogsByOrder(Long orderId) {
-        return inventoryLogRepository.findByOrderIdOrderByCreatedAtDesc(orderId)
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    @Cacheable(
-            value = "inventory-log",
-            key = "#userId + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
-    )
-    public CacheablePage<InventoryLogResponse> getLogsByUser(Long userId, Pageable pageable) {
-        Page<InventoryLogResponse> page = inventoryLogRepository
-                .findByPerformedByIdOrderByCreatedAtDesc(userId, pageable)
-                .map(this::mapToResponse);
-
-        return CacheablePage.of(page);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public CacheablePage<InventoryLogResponse> getLogsByDateRange(
-            LocalDateTime startDate,
-            LocalDateTime endDate,
-            Pageable pageable) {
-        Page<InventoryLogResponse> page = inventoryLogRepository.findByDateRange(startDate, endDate, pageable)
-                .map(this::mapToResponse);
-        return CacheablePage.of(page);
-    }
-
-    @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#request.productId"),
+            @CacheEvict(value = "products", allEntries = true),
+            @CacheEvict(value = "productStock", key = "#request.productId"),
+            @CacheEvict(value = "inventory-log", allEntries = true)
+    })
     public void returnProduct(ReturnRequest request) {
-        log.info("Processing return: productId={}, quantity={}, orderId={}, customerId={}",
+        log.info("↩️ Processing return: productId={}, quantity={}, orderId={}, customerId={}",
                 request.getProductId(), request.getQuantity(), request.getOrderId(), request.getCustomerId());
 
         if (request.getQuantity() <= 0) {
@@ -293,6 +306,7 @@ public class InventoryServiceImpl implements InventoryService {
 
         UserEntity customer = userRepository.findById(request.getCustomerId())
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
+
         OrderEntity order = orderRepository.findById(request.getOrderId())
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
@@ -316,10 +330,20 @@ public class InventoryServiceImpl implements InventoryService {
         redisService.updateStock(request.getProductId(), product.getStock());
     }
 
+    /**
+     * Adjust stock (manual adjustment)
+     * Same cache eviction strategy
+     */
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Caching(evict = {
+            @CacheEvict(value = "product", key = "#request.productId"),
+            @CacheEvict(value = "products", allEntries = true),
+            @CacheEvict(value = "productStock", key = "#request.productId"),
+            @CacheEvict(value = "inventory-log", allEntries = true)
+    })
     public void adjustStock(AdjustStockRequest request) {
-        log.info("Adjusting stock: productId={}, change={}, operatorId={}, reason={}",
+        log.info("⚙️ Adjusting stock: productId={}, change={}, operatorId={}, reason={}",
                 request.getProductId(), request.getQuantityChange(), request.getOperatorId(), request.getReason());
 
         ProductEntity product = productRepository.findByIdForUpdate(request.getProductId())
@@ -353,6 +377,101 @@ public class InventoryServiceImpl implements InventoryService {
         redisService.updateStock(request.getProductId(), newStock);
     }
 
+    /**
+     * Get all inventory logs with pagination
+     *
+     * Cache key: page-size
+     * TTL: 2 minutes (logs change frequently)
+     */
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(
+            value = "inventory-log",
+            key = "'all-' + #pageable.pageNumber + '-' + #pageable.pageSize",
+            unless = "#result == null || #result.isEmpty()"
+    )
+    public CacheablePage<InventoryLogResponse> getAllLogs(Pageable pageable) {
+        log.debug("📋 Fetching inventory logs from DB: page={}, size={}",
+                pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<InventoryLogResponse> page = inventoryLogRepository
+                .findAllWithDetails(pageable)
+                .map(this::mapToResponse);
+
+        return CacheablePage.of(page);
+    }
+
+    /**
+     * Get logs by product
+     */
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(
+            value = "inventory-log",
+            key = "'product-' + #productId + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
+    )
+    public CacheablePage<InventoryLogResponse> getLogsByProduct(Long productId, Pageable pageable) {
+        log.debug("📋 Fetching logs by product: productId={}", productId);
+
+        Page<InventoryLogResponse> page = inventoryLogRepository
+                .findByProductIdOrderByCreatedAtDesc(productId, pageable)
+                .map(this::mapToResponse);
+
+        return CacheablePage.of(page);
+    }
+
+    /**
+     * Get logs by order
+     */
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(value = "inventory-log", key = "'order-' + #orderId")
+    public List<InventoryLogResponse> getLogsByOrder(Long orderId) {
+        log.debug("📋 Fetching logs by order: orderId={}", orderId);
+
+        return inventoryLogRepository.findByOrderIdOrderByCreatedAtDesc(orderId)
+                .stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get logs by user
+     */
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(
+            value = "inventory-log",
+            key = "'user-' + #userId + '-' + #pageable.pageNumber + '-' + #pageable.pageSize"
+    )
+    public CacheablePage<InventoryLogResponse> getLogsByUser(Long userId, Pageable pageable) {
+        log.debug("📋 Fetching logs by user: userId={}", userId);
+
+        Page<InventoryLogResponse> page = inventoryLogRepository
+                .findByPerformedByIdOrderByCreatedAtDesc(userId, pageable)
+                .map(this::mapToResponse);
+
+        return CacheablePage.of(page);
+    }
+
+    /**
+     * Get logs by date range
+     * Don't cache this - users may query different date ranges
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public CacheablePage<InventoryLogResponse> getLogsByDateRange(
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Pageable pageable) {
+        log.debug("📋 Fetching logs by date range: {} to {}", startDate, endDate);
+
+        Page<InventoryLogResponse> page = inventoryLogRepository
+                .findByDateRange(startDate, endDate, pageable)
+                .map(this::mapToResponse);
+
+        return CacheablePage.of(page);
+    }
 
     private InventoryLogResponse mapToResponse(InventoryLogEntity log) {
         return InventoryLogResponse.builder()
