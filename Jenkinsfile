@@ -12,7 +12,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git 'https://github.com/Vanthuyen/java-smartshop-project.git'
+                git branch: 'main', url: 'https://github.com/Vanthuyen/java-smartshop-project.git'
             }
         }
 
