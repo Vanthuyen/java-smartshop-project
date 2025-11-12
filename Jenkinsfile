@@ -22,9 +22,19 @@ pipeline {
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Login to Docker Hub') {
             steps {
-                sh 'docker build -t $DOCKER_IMAGE:latest .'
+                withCredentials([usernamePassword(credentialsId: 'SmartShop1234',
+                                                 usernameVariable: 'DOCKER_USER',
+                                                 passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh 'docker push $DOCKER_IMAGE:latest'
             }
         }
 
